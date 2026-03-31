@@ -10,7 +10,7 @@ GO
 
 DECLARE @SchemaName nvarchar(128) = N'data'
 DECLARE @TableName nvarchar(128) = N'server_properties'
-DECLARE @TableDefinitionHash varbinary(32) = 0x5DEB47875A3C8615384B1E74E3FA38EA9E831756C5F0199B87EE8AB36AB71B9C
+DECLARE @TableDefinitionHash varbinary(32) = 0x74167C9BAA53A7D8C3239409D0F770A4594D9B2A608BBF87F887EB4AD04CCF1A
 
 DECLARE @TableExists int
 DECLARE @TableHasChanged int
@@ -51,8 +51,8 @@ BEGIN
 		[IsIntegratedSecurityOnly] [int] NULL,
 		[FilestreamConfiguredLevel] [int] NULL,
 		[IsHadrEnabled] [int] NULL,
-		[LastUpdated] [datetime2](7) NOT NULL,
-		[LastHandled] [datetime2](7) NULL,
+		[LastUpdatedUTC] [datetime2](7) NOT NULL,
+		[LastHandledUTC] [datetime2](7) NULL,
 		 CONSTRAINT [PK_data_server_properties] PRIMARY KEY CLUSTERED 
 			(
 				[serverid] ASC
@@ -90,6 +90,7 @@ Date		Name				Description
 2024-01-17  Mikael Wedham		+Added value generation for serverid
 2024-01-19	Mikael Wedham		+Added logging of duration
 2024-01-23	Mikael Wedham		+Added errorhandling
+2026-03-31	Mikael Wedham		Adding UTC to column names
 *******************************************************************************/
 ALTER PROCEDURE [collect].[server_properties]
 AS
@@ -103,7 +104,7 @@ SET NOCOUNT ON
 	DECLARE @error int = 0
 
 	SELECT @current_start = SYSUTCDATETIME()
-	INSERT INTO [internal].[executionlog] ([collector], [StartTime])
+	INSERT INTO [internal].[executionlog] ([collector], [StartTimeUTC])
 	VALUES (N'server_properties', @current_start)
 	SET @current_logitem = SCOPE_IDENTITY()
 
@@ -150,7 +151,7 @@ SET NOCOUNT ON
 				,[IsIntegratedSecurityOnly]
 				,[FilestreamConfiguredLevel]
 				,[IsHadrEnabled]
-				,[LastUpdated] )
+				,[LastUpdatedUTC] )
 			VALUES
 				(NEWID()
 				,[MachineName]
@@ -179,7 +180,7 @@ SET NOCOUNT ON
 			,[IsIntegratedSecurityOnly] = src.[IsIntegratedSecurityOnly]
 			,[FilestreamConfiguredLevel] = src.[FilestreamConfiguredLevel]
 			,[IsHadrEnabled] = src.[IsHadrEnabled]
-			,[LastUpdated] = SYSUTCDATETIME();
+			,[LastUpdatedUTC] = SYSUTCDATETIME();
 
 	END TRY
 	BEGIN CATCH
@@ -190,7 +191,7 @@ SET NOCOUNT ON
 
 	SELECT @current_end = SYSUTCDATETIME()
 	UPDATE [internal].[executionlog]
-	SET [EndTime] = @current_end
+	SET [EndTimeUTC] = @current_end
 	, [Duration_ms] =  ((CAST(DATEDIFF(S, @current_start, @current_end) AS bigint) * 1000000) + (DATEPART(MCS, @current_end)-DATEPART(MCS, @current_start))) / 1000.0
 	, [errornumber] = @@ERROR
 	WHERE [Id] = @current_logitem
@@ -222,6 +223,7 @@ GO
 Date		Name				Description
 ----------	-------------		-----------------------------------------------
 2022-04-28	Mikael Wedham		+Created v1
+2026-03-31	Mikael Wedham		Adding UTC to column names
 *******************************************************************************/
 ALTER PROCEDURE [transfer].[server_properties]
 AS
@@ -229,7 +231,7 @@ BEGIN
 	SET NOCOUNT ON
 
 	UPDATE s
-	SET [LastHandled] = SYSUTCDATETIME()
+	SET [LastHandledUTC] = SYSUTCDATETIME()
 	OUTPUT inserted.[serverid] 
 	     , inserted.[MachineName]
 		 , inserted.[ServerName]
@@ -243,10 +245,10 @@ BEGIN
 		 , inserted.[IsIntegratedSecurityOnly]
 		 , inserted.[FilestreamConfiguredLevel]
 		 , inserted.[IsHadrEnabled]
-		 , inserted.[LastUpdated]
-		 , inserted.[LastHandled]
+		 , inserted.[LastUpdatedUTC]
+		 , inserted.[LastHandledUTC]
 	FROM [data].[server_properties] s
-	WHERE [LastHandled] IS NULL OR [LastUpdated] > [LastHandled]
+	WHERE [LastHandledUTC] IS NULL OR [LastUpdatedUTC] > [LastHandledUTC]
 	AND [MachineName] = CAST(SERVERPROPERTY('MachineName') AS nvarchar(128))
 
 END

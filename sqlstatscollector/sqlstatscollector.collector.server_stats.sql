@@ -10,7 +10,7 @@ GO
 
 DECLARE @SchemaName nvarchar(128) = N'data'
 DECLARE @TableName nvarchar(128) = N'server_stats'
-DECLARE @TableDefinitionHash varbinary(32) = 0x5C1C8DCF38D4E21A86EFA7918FA96778B2AF8A4FBD75FF6AE6D9621B3224B7A1
+DECLARE @TableDefinitionHash varbinary(32) = 0xE4F42B33044497D2A75E16D0A5DB111AD7DC718F7A726C11A9D93E425D3AF104
 
 DECLARE @TableExists int
 DECLARE @TableHasChanged int
@@ -38,14 +38,14 @@ BEGIN
 	SELECT @msg = N'Creating ' + @FullName
 	RAISERROR(@msg, 10, 1) WITH NOWAIT
 	CREATE TABLE [data].[server_stats](
-		[rowtime] [datetime2](7) NOT NULL,
+		[rowtimeutc] [datetime2](7) NOT NULL,
 		[user_connections] [int] NOT NULL,
 		[batch_requests_sec] [int] NOT NULL,
-		[LastUpdated] [datetime2](7) NOT NULL,
-		[LastHandled] [datetime2](7) NULL,
+		[LastUpdatedUTC] [datetime2](7) NOT NULL,
+		[LastHandledUTC] [datetime2](7) NULL,
 		CONSTRAINT PK_data_server_stats PRIMARY KEY CLUSTERED 
 			(
-				[rowtime] ASC
+				[rowtimeutc] ASC
 			) ON [PRIMARY]	
 	) ON [PRIMARY]
 END
@@ -122,6 +122,7 @@ Date		Name				Description
 2022-04-28	Mikael Wedham		+Modified Schema of temp-tables
 2024-01-19	Mikael Wedham		+Added logging of duration
 2024-01-23	Mikael Wedham		+Added errorhandling
+2026-03-31	Mikael Wedham		Adding UTC to column names
 *******************************************************************************/
 ALTER PROCEDURE [collect].[server_stats]
 AS
@@ -135,7 +136,7 @@ SET NOCOUNT ON
 	DECLARE @error int = 0
 
 	SELECT @current_start = SYSUTCDATETIME()
-	INSERT INTO [internal].[executionlog] ([collector], [StartTime])
+	INSERT INTO [internal].[executionlog] ([collector], [StartTimeUTC])
 	VALUES (N'server_stats', @current_start)
 	SET @current_logitem = SCOPE_IDENTITY()
 
@@ -167,7 +168,7 @@ SET NOCOUNT ON
 			SELECT @batch_request_count = ISNULL(@batch_requests_sec, 0)
 		END
 
-		INSERT INTO [data].[server_stats] ([user_connections], [batch_requests_sec], [rowtime], [LastUpdated])
+		INSERT INTO [data].[server_stats] ([user_connections], [batch_requests_sec], [rowtimeutc], [LastUpdatedUTC])
 									SELECT @user_connections , @batch_request_count, SYSUTCDATETIME(), SYSUTCDATETIME()
 
 		TRUNCATE TABLE [internal_data].[server_stats]
@@ -184,7 +185,7 @@ SET NOCOUNT ON
 
 	SELECT @current_end = SYSUTCDATETIME()
 	UPDATE [internal].[executionlog]
-	SET [EndTime] = @current_end
+	SET [EndTimeUTC] = @current_end
 	, [Duration_ms] =  ((CAST(DATEDIFF(S, @current_start, @current_end) AS bigint) * 1000000) + (DATEPART(MCS, @current_end)-DATEPART(MCS, @current_start))) / 1000.0
 	, [errornumber] = @@ERROR
 	WHERE [Id] = @current_logitem
@@ -192,6 +193,9 @@ SET NOCOUNT ON
 
 END
 GO
+
+
+
 
 RAISERROR(N'/****** Object:  StoredProcedure [transfer].[server_stats] ******/', 10, 1) WITH NOWAIT
 GO
@@ -215,6 +219,7 @@ Date		Name				Description
 ----------	-------------		-----------------------------------------------
 2022-04-28	Mikael Wedham		+Created v1
 2022-08-17	Mikael Wedham		Added cleanup of old data
+2026-03-31	Mikael Wedham		Adding UTC to column names
 *******************************************************************************/
 ALTER PROCEDURE [transfer].[server_stats]
 (@cleanup bit = 0)
@@ -227,20 +232,20 @@ BEGIN
 	WHERE [MachineName] = CAST(SERVERPROPERTY('MachineName') AS nvarchar(128))
 
 	UPDATE s
-	SET [LastHandled] = SYSUTCDATETIME()
+	SET [LastHandledUTC] = SYSUTCDATETIME()
 	OUTPUT @serverid serverid 
 		 , inserted.[user_connections]
 		 , inserted.[batch_requests_sec]
-		 , inserted.[rowtime]
-		 , inserted.[LastUpdated]
-		 , inserted.[LastHandled]
+		 , inserted.[rowtimeutc]
+		 , inserted.[LastUpdatedUTC]
+		 , inserted.[LastHandledUTC]
 	FROM [data].[server_stats] s
-	WHERE [LastHandled] IS NULL OR [LastUpdated] > [LastHandled]
+	WHERE [LastHandledUTC] IS NULL OR [LastUpdatedUTC] > [LastHandledUTC]
 
 	IF @cleanup = 1
 	BEGIN
 		DELETE FROM [data].[server_stats]
-		WHERE [LastHandled] < DATEADD(DAY, -7, GETDATE())
+		WHERE [LastHandledUTC] < DATEADD(DAY, -7, GETDATE())
 	END
 
 END

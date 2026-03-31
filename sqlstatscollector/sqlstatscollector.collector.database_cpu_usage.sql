@@ -10,7 +10,7 @@ GO
 
 DECLARE @SchemaName nvarchar(128) = N'data'
 DECLARE @TableName nvarchar(128) = N'database_cpu_usage'
-DECLARE @TableDefinitionHash varbinary(32) = 0x1E541A8676195F7EE861FADC31DC81C10469D4256BD7506DFCD9138D2D37FE10
+DECLARE @TableDefinitionHash varbinary(32) = 0xCD2A4063E11BF5A4228A2D59BC0113FAB1330E304A2E830162A099020D0469FB
 
 DECLARE @TableExists int
 DECLARE @TableHasChanged int
@@ -38,15 +38,15 @@ BEGIN
 	SELECT @msg = N'Creating ' + @FullName
 	RAISERROR(@msg, 10, 1) WITH NOWAIT
 	CREATE TABLE [data].[database_cpu_usage](
-		[rowtime] [datetime2](7) NOT NULL,
+		[rowtimeutc] [datetime2](7) NOT NULL,
 		[database_id] [int] NOT NULL,
 		[cpu_time_ms] [decimal](18, 3) NOT NULL,
 		[cpu_percent] [decimal](5, 2) NOT NULL,
-		[LastUpdated] [datetime2](7) NOT NULL,
-		[LastHandled] [datetime2](7) NULL,
+		[LastUpdatedUTC] [datetime2](7) NOT NULL,
+		[LastHandledUTC] [datetime2](7) NULL,
 		CONSTRAINT PK_data_database_cpu_usage PRIMARY KEY CLUSTERED 
 			(
-				rowtime ASC,
+				rowtimeutc ASC,
 				database_id ASC
 			) ON [PRIMARY]
 	) ON [PRIMARY]
@@ -122,6 +122,7 @@ Date		Name				Description
 2022-05-05	Mikael Wedham		+Created v1
 2024-01-19	Mikael Wedham		+Added logging of duration
 2024-01-23	Mikael Wedham		+Added errorhandling
+2026-03-31	Mikael Wedham		Adding UTC to column names
 *******************************************************************************/
 ALTER PROCEDURE [collect].[database_cpu_usage]
 AS
@@ -135,7 +136,7 @@ SET NOCOUNT ON
 	DECLARE @error int = 0
 
 	SELECT @current_start = SYSUTCDATETIME()
-	INSERT INTO [internal].[executionlog] ([collector], [StartTime])
+	INSERT INTO [internal].[executionlog] ([collector], [StartTimeUTC])
 	VALUES (N'database_cpu_usage', @current_start)
 	SET @current_logitem = SCOPE_IDENTITY()
 
@@ -159,7 +160,7 @@ SET NOCOUNT ON
 			, [cpu_time_ms] = cpu.[cpu_time_ms] - ISNULL(pcpu.[cpu_time_ms], 0)
 		FROM @database_cpu_usage cpu LEFT OUTER JOIN [internal_data].[database_cpu_usage] pcpu
 		ON cpu.database_id = pcpu.database_id)
-		INSERT INTO [data].[database_cpu_usage] ([rowtime], [database_id], [cpu_time_ms], [cpu_percent], [LastUpdated])
+		INSERT INTO [data].[database_cpu_usage] ([rowtimeutc], [database_id], [cpu_time_ms], [cpu_percent], [LastUpdatedUTC])
 		SELECT [rowtime] = SYSUTCDATETIME()
 			, [database_id]
 			, [cpu_time_ms]
@@ -182,7 +183,7 @@ SET NOCOUNT ON
 
 	SELECT @current_end = SYSUTCDATETIME()
 	UPDATE [internal].[executionlog]
-	SET [EndTime] = @current_end
+	SET [EndTimeUTC] = @current_end
 	, [Duration_ms] =  ((CAST(DATEDIFF(S, @current_start, @current_end) AS bigint) * 1000000) + (DATEPART(MCS, @current_end)-DATEPART(MCS, @current_start))) / 1000.0
 	, [errornumber] = @@ERROR
 	WHERE [Id] = @current_logitem
@@ -214,6 +215,7 @@ Date		Name				Description
 ----------	-------------		-----------------------------------------------
 2022-05-05	Mikael Wedham		+Created v1
 2022-08-17	Mikael Wedham		Added cleanup of old data
+2026-03-31	Mikael Wedham		Adding UTC to column names
 *******************************************************************************/
 ALTER PROCEDURE [transfer].[database_cpu_usage]
 (@cleanup bit = 0)
@@ -226,21 +228,21 @@ BEGIN
 	WHERE [MachineName] = CAST(SERVERPROPERTY('MachineName') AS nvarchar(128))
 
 	UPDATE s
-	SET [LastHandled] = SYSUTCDATETIME()
+	SET [LastHandledUTC] = SYSUTCDATETIME()
 	OUTPUT @serverid serverid 
-	     , inserted.[rowtime]
+	     , inserted.[rowtimeutc]
 		 , inserted.[database_id]
 		 , inserted.[cpu_time_ms]
 		 , inserted.[cpu_percent]
-		 , inserted.[LastUpdated]
-		 , inserted.[LastHandled]
+		 , inserted.[LastUpdatedUTC]
+		 , inserted.[LastHandledUTC]
 	FROM [data].[database_cpu_usage] s
-	WHERE [LastHandled] IS NULL OR [LastUpdated] > [LastHandled]
+	WHERE [LastHandledUTC] IS NULL OR [LastUpdatedUTC] > [LastHandledUTC]
 
 	IF @cleanup = 1
 	BEGIN
 		DELETE FROM [data].[database_cpu_usage]
-		WHERE [LastHandled] < DATEADD(DAY, -7, GETDATE())
+		WHERE [LastHandledUTC] < DATEADD(DAY, -7, GETDATE())
 	END
 
 END

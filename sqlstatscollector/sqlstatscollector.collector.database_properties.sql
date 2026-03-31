@@ -10,7 +10,7 @@ GO
 
 DECLARE @SchemaName nvarchar(128) = N'data'
 DECLARE @TableName nvarchar(128) = N'database_properties'
-DECLARE @TableDefinitionHash varbinary(32) = 0x4B7852246256E0355C800E7E93FD3CA0AF14C6350FA1A5C16CE51CC4C8AA7B1F
+DECLARE @TableDefinitionHash varbinary(32) = 0xE48D5E4FC00B43605C302597A6681D0A8EA14EBC9FD81E2C9BE7C530E0B6FDD2
 
 DECLARE @TableExists int
 DECLARE @TableHasChanged int
@@ -53,8 +53,8 @@ BEGIN
 		[LastDiffBackupTime] [datetime] NULL,
 		[LastLogBackupTime] [datetime] NULL,
 		[LastKnownGoodDBCCTime] [datetime] NULL,
-		[LastUpdated] [datetime2](7) NOT NULL,
-		[LastHandled] [datetime2](7) NULL,
+		[LastUpdatedUTC] [datetime2](7) NOT NULL,
+		[LastHandledUTC] [datetime2](7) NULL,
 		 CONSTRAINT [PK_database_properties] PRIMARY KEY CLUSTERED 
 			(
 				[database_id] ASC
@@ -96,6 +96,7 @@ Date		Name				Description
                                  is unavailable due to AOAG
 2024-01-19	Mikael Wedham		+Added logging of duration
 2024-01-23	Mikael Wedham		+Added errorhandling
+2026-03-31	Mikael Wedham		Adding UTC to column names
 *******************************************************************************/
 ALTER PROCEDURE [collect].[database_properties]
 AS
@@ -109,7 +110,7 @@ SET NOCOUNT ON
 	DECLARE @error int = 0
 
 	SELECT @current_start = SYSUTCDATETIME()
-	INSERT INTO [internal].[executionlog] ([collector], [StartTime])
+	INSERT INTO [internal].[executionlog] ([collector], [StartTimeUTC])
 	VALUES (N'database_properties', @current_start)
 	SET @current_logitem = SCOPE_IDENTITY()
 
@@ -243,7 +244,7 @@ SET NOCOUNT ON
 		FROM database_properties) src ON src.[database_id] = dest.[database_id]
 		WHEN NOT MATCHED THEN
 		INSERT ([database_id] ,[name] ,[owner_sid] ,[create_date] ,[compatibility_level] ,[collation_name] ,[is_auto_close_on] ,[is_auto_shrink_on] ,[state_desc] 
-				,[recovery_model_desc] ,[page_verify_option_desc] ,[LastFullBackupTime] ,[LastDiffBackupTime] ,[LastLogBackupTime] ,[LastKnownGoodDBCCTime] ,[LastUpdated])
+				,[recovery_model_desc] ,[page_verify_option_desc] ,[LastFullBackupTime] ,[LastDiffBackupTime] ,[LastLogBackupTime] ,[LastKnownGoodDBCCTime] ,[LastUpdatedUTC])
 		VALUES (src.[database_id] ,src.[name] ,src.[owner_sid] ,src.[create_date] ,src.[compatibility_level] ,src.[collation_name] ,src.[is_auto_close_on] ,src.[is_auto_shrink_on] ,src.[state_desc] 
 				,src.[recovery_model_desc] ,src.[page_verify_option_desc] ,src.[LastFullBackupTime] ,src.[LastDiffBackupTime] ,src.[LastLogBackupTime] ,src.[LastKnownGoodDBCCTime] ,SYSUTCDATETIME())
 		WHEN MATCHED THEN
@@ -262,7 +263,7 @@ SET NOCOUNT ON
 			,[LastDiffBackupTime] = src.[LastDiffBackupTime]
 			,[LastLogBackupTime] = src.[LastLogBackupTime]
 			,[LastKnownGoodDBCCTime] = src.[LastKnownGoodDBCCTime]
-			,[LastUpdated] = SYSUTCDATETIME();
+			,[LastUpdatedUTC] = SYSUTCDATETIME();
 
 	END TRY
 	BEGIN CATCH
@@ -273,7 +274,7 @@ SET NOCOUNT ON
 
 	SELECT @current_end = SYSUTCDATETIME()
 	UPDATE [internal].[executionlog]
-	SET [EndTime] = @current_end
+	SET [EndTimeUTC] = @current_end
 	, [Duration_ms] =  ((CAST(DATEDIFF(S, @current_start, @current_end) AS bigint) * 1000000) + (DATEPART(MCS, @current_end)-DATEPART(MCS, @current_start))) / 1000.0
 	, [errornumber] = @@ERROR
 	WHERE [Id] = @current_logitem
@@ -304,6 +305,7 @@ GO
 Date		Name				Description
 ----------	-------------		-----------------------------------------------
 2022-04-28	Mikael Wedham		+Created v1
+2026-03-31	Mikael Wedham		Adding UTC to column names
 *******************************************************************************/
 ALTER PROCEDURE [transfer].[database_properties]
 AS
@@ -315,7 +317,7 @@ BEGIN
 	WHERE [MachineName] = CAST(SERVERPROPERTY('MachineName') AS nvarchar(128))
 
 	UPDATE s
-	SET [LastHandled] = SYSUTCDATETIME()
+	SET [LastHandledUTC] = SYSUTCDATETIME()
 	OUTPUT @serverid serverid 
 	     , inserted.[database_id]
 		 , inserted.[name]
@@ -332,10 +334,10 @@ BEGIN
 		 , inserted.[LastDiffBackupTime]
 		 , inserted.[LastLogBackupTime]
 		 , inserted.[LastKnownGoodDBCCTime]
-		 , inserted.[LastUpdated]
-		 , inserted.[LastHandled]
+		 , inserted.[LastUpdatedUTC]
+		 , inserted.[LastHandledUTC]
 	FROM [data].[database_properties] s
-	WHERE [LastHandled] IS NULL OR [LastUpdated] > [LastHandled]
+	WHERE [LastHandledUTC] IS NULL OR [LastUpdatedUTC] > [LastHandledUTC]
 
 END
 GO

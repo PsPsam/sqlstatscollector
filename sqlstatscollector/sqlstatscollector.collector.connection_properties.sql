@@ -79,6 +79,7 @@ Date		Name				Description
 2024-01-19	Mikael Wedham		+Added logging of duration
 2024-01-23	Mikael Wedham		+Added errorhandling
 2024-02-26	Mikael Wedham		+Removed time filter from selection due to UTC issues
+2026-03-31	Mikael Wedham		Adding UTC to column names
 *******************************************************************************/
 ALTER PROCEDURE [collect].[connection_properties]
 AS
@@ -92,12 +93,12 @@ SET NOCOUNT ON
 	DECLARE @error int = 0
 
 	DECLARE @previous_collection_date datetime2(7)
-	SELECT @previous_collection_date = ISNULL(MAX([StartTime]), '2000-01-01')
+	SELECT @previous_collection_date = ISNULL(MAX([StartTimeUTC]), '2000-01-01')
 	FROM [internal].[executionlog] 
 	WHERE [collector] = N'connection_properties'
 
 	SELECT @current_start = SYSUTCDATETIME()
-	INSERT INTO [internal].[executionlog] ([collector], [StartTime])
+	INSERT INTO [internal].[executionlog] ([collector], [StartTimeUTC])
 	VALUES (N'connection_properties', @current_start)
 	SET @current_logitem = SCOPE_IDENTITY()
 
@@ -176,7 +177,7 @@ SET NOCOUNT ON
 
 	SELECT @current_end = SYSUTCDATETIME()
 	UPDATE [internal].[executionlog]
-	SET [EndTime] = @current_end
+	SET [EndTimeUTC] = @current_end
 	, [Duration_ms] =  ((CAST(DATEDIFF(S, @current_start, @current_end) AS bigint) * 1000000) + (DATEPART(MCS, @current_end)-DATEPART(MCS, @current_start))) / 1000.0
 	, [errornumber] = @@ERROR
 	WHERE [Id] = @current_logitem
@@ -184,6 +185,54 @@ SET NOCOUNT ON
 
 END
 GO
+
+
+
+
+RAISERROR(N'/****** Object:  StoredProcedure [transfer].[cpu_stats] ******/', 10, 1) WITH NOWAIT
+GO
+
+IF OBJECT_ID(N'[transfer].[connection_properties]', N'P') IS NULL
+BEGIN
+	EXEC ('CREATE PROCEDURE [transfer].[connection_properties] AS SELECT NULL')
+END
+GO
+
+/*******************************************************************************
+   Copyright (c) 2022 Mikael Wedham (MIT License)
+   -----------------------------------------
+   [transfer].[connection_properties]
+   -----------------------------------------
+   Prepares and marks collected data as transferred. Returns the rows that
+   are updated since last transfer.
+
+Date		Name				Description
+----------	-------------		-----------------------------------------------
+2026-03-31	Mikael Wedham		+Created v1
+*******************************************************************************/
+ALTER PROCEDURE [transfer].[connection_properties]
+(@cleanup bit = 0)
+AS
+BEGIN
+	SET NOCOUNT ON
+	DECLARE @serverid uniqueidentifier
+	SELECT @serverid = [serverid]
+	FROM [data].[server_properties]
+	WHERE [MachineName] = CAST(SERVERPROPERTY('MachineName') AS nvarchar(128))
+
+SELECT serverid = @serverid
+      ,[db_name]
+      ,[host_name]
+      ,[login_name]
+      ,[program_name]
+      ,[connection_weight]
+      ,[last_seen]
+  FROM [data].[connection_properties]
+
+END
+
+
+
 
 RAISERROR(N'Adding collector to [internal].[collectors]', 10, 1) WITH NOWAIT
 GO
