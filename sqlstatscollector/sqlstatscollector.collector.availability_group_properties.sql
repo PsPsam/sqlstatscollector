@@ -10,7 +10,7 @@ GO
 
 DECLARE @SchemaName nvarchar(128) = N'data'
 DECLARE @TableName nvarchar(128) = N'availability_group_properties'
-DECLARE @TableDefinitionHash varbinary(32) = 0x0B1BCD5EA5E6DF03B66C38155F87188D1029ED6784CFD1004006BE15FFAE1582
+DECLARE @TableDefinitionHash varbinary(32) = 0x54EFC9539D5B7D50B87B306D07EB3D60A488516B708CB2BA2FA0E8360B145B55
 
 DECLARE @TableExists int
 DECLARE @TableHasChanged int
@@ -43,8 +43,8 @@ BEGIN
 		[primary_replica] [nvarchar](128) NOT NULL,
 		[recovery_health_desc] [nvarchar](60) NULL,
 		[synchronization_health_desc] [nvarchar](60) NULL,
-		[LastUpdated] [datetime2](7) NOT NULL,
-		[LastHandled] [datetime2](7) NULL,
+		[LastUpdatedUTC] [datetime2](7) NOT NULL,
+		[LastHandledUTC] [datetime2](7) NULL,
 		 CONSTRAINT [PK_availability_group_properties] PRIMARY KEY CLUSTERED 
 			(
 				[group_id] ASC
@@ -79,6 +79,7 @@ Date		Name				Description
 2022-05-04	Mikael Wedham		+Created v1
 2024-01-19	Mikael Wedham		+Added logging of duration
 2024-01-23	Mikael Wedham		+Added errorhandling
+2026-03-31	Mikael Wedham		Adding UTC to column names
 *******************************************************************************/
 ALTER PROCEDURE [collect].[availability_group_properties]
 AS
@@ -92,7 +93,7 @@ SET NOCOUNT ON
 	DECLARE @error int = 0
 
 	SELECT @current_start = SYSUTCDATETIME()
-	INSERT INTO [internal].[executionlog] ([collector], [StartTime])
+	INSERT INTO [internal].[executionlog] ([collector], [StartTimeUTC])
 	VALUES (N'availability_group_properties', @current_start)
 	SET @current_logitem = SCOPE_IDENTITY()
 
@@ -127,14 +128,14 @@ SET NOCOUNT ON
 		USING (	SELECT [group_id], [name], [primary_replica], [recovery_health_desc], [synchronization_health_desc], [LastUpdated] FROM @ag_info ) src
 		ON src.[group_id] = dest.[group_id]
 		WHEN NOT MATCHED THEN
-			INSERT ([group_id], [name], [primary_replica], [recovery_health_desc], [synchronization_health_desc], [LastUpdated])
+			INSERT ([group_id], [name], [primary_replica], [recovery_health_desc], [synchronization_health_desc], [LastUpdatedUTC])
 			VALUES (src.[group_id], src.[name], src.[primary_replica], src.[recovery_health_desc], src.[synchronization_health_desc], src.[LastUpdated])
 		WHEN MATCHED THEN
 			UPDATE SET [name] = src.[name]
 					, [primary_replica] = src.[primary_replica]
 					, [recovery_health_desc] = src.[recovery_health_desc]
 					, [synchronization_health_desc] = src.[synchronization_health_desc]
-					, [LastUpdated] = src.[LastUpdated]
+					, [LastUpdatedUTC] = src.[LastUpdated]
 		;
 
 	END TRY
@@ -146,7 +147,7 @@ SET NOCOUNT ON
 
 	SELECT @current_end = SYSUTCDATETIME()
 	UPDATE [internal].[executionlog]
-	SET [EndTime] = @current_end
+	SET [EndTimeUTC] = @current_end
 	, [Duration_ms] =  ((CAST(DATEDIFF(S, @current_start, @current_end) AS bigint) * 1000000) + (DATEPART(MCS, @current_end)-DATEPART(MCS, @current_start))) / 1000.0
 	, [errornumber] = @@ERROR
 	WHERE [Id] = @current_logitem
@@ -176,6 +177,7 @@ GO
 Date		Name				Description
 ----------	-------------		-----------------------------------------------
 2022-05-04	Mikael Wedham		+Created v1
+2026-03-31	Mikael Wedham		Adding UTC to column names
 *******************************************************************************/
 ALTER PROCEDURE [transfer].[availability_group_properties]
 AS
@@ -187,17 +189,17 @@ BEGIN
 	WHERE [MachineName] = CAST(SERVERPROPERTY('MachineName') AS nvarchar(128))
 
 	UPDATE s
-	SET [LastHandled] = SYSUTCDATETIME()
+	SET [LastHandledUTC] = SYSUTCDATETIME()
 	OUTPUT @serverid serverid 
 	     , inserted.[group_id]
 		 , inserted.[name]
 		 , inserted.[primary_replica]
 		 , inserted.[recovery_health_desc]
 		 , inserted.[synchronization_health_desc]
-		 , inserted.[LastUpdated]
-		 , inserted.[LastHandled]
+		 , inserted.[LastUpdatedUTC]
+		 , inserted.[LastHandledUTC]
 	FROM [data].[availability_group_properties] s
-	WHERE [LastHandled] IS NULL OR [LastUpdated] > [LastHandled]
+	WHERE [LastHandledUTC] IS NULL OR [LastUpdatedUTC] > [LastHandledUTC]
 
 END
 GO

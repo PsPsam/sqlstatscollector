@@ -10,7 +10,7 @@ GO
 
 DECLARE @SchemaName nvarchar(128) = N'data'
 DECLARE @TableName nvarchar(128) = N'job_properties'
-DECLARE @TableDefinitionHash varbinary(32) = 0x475361663745113A486C98A4C2736B1178A5429966BCA2D1FDEEFF1543710916
+DECLARE @TableDefinitionHash varbinary(32) = 0x649721BBC7292D233699F117823C7FBEACE0347FC2793FEED6A8F367663DF415
 
 DECLARE @TableExists int
 DECLARE @TableHasChanged int
@@ -49,8 +49,8 @@ BEGIN
 		[last_startdate] [datetime] NOT NULL,
 		[last_duration] [decimal](18, 3) NOT NULL,
 		[run_duration_avg] [decimal](18, 3) NOT NULL,
-		[LastUpdated] [datetime2](7) NOT NULL,
-		[LastHandled] [datetime2](7) NULL,
+		[LastUpdatedUTC] [datetime2](7) NOT NULL,
+		[LastHandledUTC] [datetime2](7) NULL,
 		 CONSTRAINT [PK_job_properties] PRIMARY KEY CLUSTERED 
 			(
 				[job_id] ASC
@@ -90,6 +90,7 @@ Date		Name				Description
 2024-01-17  Mikael Wedham		+Refactored for use with synonyms in msdb
 2024-01-19	Mikael Wedham		+Added logging of duration
 2024-01-23	Mikael Wedham		+Added errorhandling
+2026-03-31	Mikael Wedham		Adding UTC to column names
 *******************************************************************************/
 ALTER PROCEDURE [collect].[job_properties]
 AS
@@ -103,7 +104,7 @@ SET NOCOUNT ON
 	DECLARE @error int = 0
 
 	SELECT @current_start = SYSUTCDATETIME()
-	INSERT INTO [internal].[executionlog] ([collector], [StartTime])
+	INSERT INTO [internal].[executionlog] ([collector], [StartTimeUTC])
 	VALUES (N'job_properties', @current_start)
 	SET @current_logitem = SCOPE_IDENTITY()
 
@@ -173,7 +174,7 @@ SET NOCOUNT ON
 				,[last_duration]
 				,[last_startdate]
 				,[run_duration_avg]
-				,[LastUpdated])
+				,[LastUpdatedUTC])
 			VALUES
 				(src.[job_id]
 				,src.[job_name]
@@ -200,7 +201,7 @@ SET NOCOUNT ON
 			,[last_duration] = src.[last_duration]
 			,[last_startdate] = src.[last_startdate]
 			,[run_duration_avg] = src.[run_duration_avg]
-			,[LastUpdated] = SYSUTCDATETIME() 
+			,[LastUpdatedUTC] = SYSUTCDATETIME() 
 		;
 
 	END TRY
@@ -212,7 +213,7 @@ SET NOCOUNT ON
 
 	SELECT @current_end = SYSUTCDATETIME()
 	UPDATE [internal].[executionlog]
-	SET [EndTime] = @current_end
+	SET [EndTimeUTC] = @current_end
 	, [Duration_ms] =  ((CAST(DATEDIFF(S, @current_start, @current_end) AS bigint) * 1000000) + (DATEPART(MCS, @current_end)-DATEPART(MCS, @current_start))) / 1000.0
 	, [errornumber] = @@ERROR
 	WHERE [Id] = @current_logitem
@@ -244,6 +245,7 @@ GO
 Date		Name				Description
 ----------	-------------		-----------------------------------------------
 2022-04-28	Mikael Wedham		+Created v1
+2026-03-31	Mikael Wedham		Adding UTC to column names
 *******************************************************************************/
 ALTER PROCEDURE [transfer].[job_properties]
 AS
@@ -255,7 +257,7 @@ BEGIN
 	WHERE [MachineName] = CAST(SERVERPROPERTY('MachineName') AS nvarchar(128))
 
 	UPDATE s
-	SET [LastHandled] = SYSUTCDATETIME()
+	SET [LastHandledUTC] = SYSUTCDATETIME()
 	OUTPUT @serverid serverid 
 	     , inserted.[job_id]
 		 , inserted.[job_name]
@@ -268,10 +270,10 @@ BEGIN
 		 , inserted.[last_startdate]
 		 , inserted.[last_duration]
 		 , inserted.[run_duration_avg]
-		 , inserted.[LastUpdated]
-		 , inserted.[LastHandled]
+		 , inserted.[LastUpdatedUTC]
+		 , inserted.[LastHandledUTC]
 	FROM [data].[job_properties] s
-	WHERE [LastHandled] IS NULL OR [LastUpdated] > [LastHandled]
+	WHERE [LastHandledUTC] IS NULL OR [LastUpdatedUTC] > [LastHandledUTC]
 
 END
 GO

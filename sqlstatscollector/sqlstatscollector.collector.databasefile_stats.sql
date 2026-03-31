@@ -10,7 +10,7 @@ GO
 
 DECLARE @SchemaName nvarchar(128) = N'data'
 DECLARE @TableName nvarchar(128) = N'databasefile_stats'
-DECLARE @TableDefinitionHash varbinary(32) = 0xB24F80E7FBD33608914B36E241A4E7C75B50FBC923263123D56264F31DD69C14
+DECLARE @TableDefinitionHash varbinary(32) = 0x9F031B626A022DBA0FAB52F1C1BC6B3FCA89098216CE2A2C3C8B5D9DE7A4907B
 
 DECLARE @TableExists int
 DECLARE @TableHasChanged int
@@ -38,7 +38,7 @@ BEGIN
 	SELECT @msg = N'Creating ' + @FullName
 	RAISERROR(@msg, 10, 1) WITH NOWAIT
 	CREATE TABLE [data].[databasefile_stats](
-		[rowtime] [datetime2](7) NOT NULL,
+		[rowtimeutc] [datetime2](7) NOT NULL,
 		[database_id] [int] NOT NULL,
 		[file_id] [int] NOT NULL,
 		[size_mb] [decimal](19, 4) NOT NULL,
@@ -49,11 +49,11 @@ BEGIN
 		[num_of_writes] [bigint] NOT NULL,
 		[num_of_bytes_written] [bigint] NOT NULL,
 		[io_stall_write_ms] [bigint] NOT NULL,
-		[LastUpdated] [datetime2](7) NOT NULL,
-		[LastHandled] [datetime2](7) NULL,
+		[LastUpdatedUTC] [datetime2](7) NOT NULL,
+		[LastHandledUTC] [datetime2](7) NULL,
 		CONSTRAINT PK_data_databasefile_stats PRIMARY KEY CLUSTERED 
 			(
-				rowtime ASC,
+				rowtimeutc ASC,
 				database_id ASC,
 				file_id ASC
 			) ON [PRIMARY]	
@@ -145,6 +145,7 @@ Date		Name				Description
                                  is unavailable due to AOAG
 2024-01-19	Mikael Wedham		+Added logging of duration
 2024-01-23	Mikael Wedham		+Added errorhandling
+2026-03-31	Mikael Wedham		Adding UTC to column names
 *******************************************************************************/
 ALTER PROCEDURE [collect].[databasefile_stats]
 AS
@@ -158,7 +159,7 @@ SET NOCOUNT ON
 	DECLARE @error int = 0
 
 	SELECT @current_start = SYSUTCDATETIME()
-	INSERT INTO [internal].[executionlog] ([collector], [StartTime])
+	INSERT INTO [internal].[executionlog] ([collector], [StartTimeUTC])
 	VALUES (N'databasefile_stats', @current_start)
 	SET @current_logitem = SCOPE_IDENTITY()
 
@@ -285,8 +286,8 @@ SET NOCOUNT ON
 				,[num_of_writes]
 				,[num_of_bytes_written]
 				,[io_stall_write_ms]
-				,[LastUpdated]
-				,[rowtime])
+				,[LastUpdatedUTC]
+				,[rowtimeutc])
 			SELECT [database_id] = currentstats.[database_id] 
 				,[file_id] = currentstats.[file_id] 
 				,[size_mb] = CAST((currentstats.[size] / 128.0 ) as decimal(19,4))
@@ -318,7 +319,7 @@ SET NOCOUNT ON
 
 	SELECT @current_end = SYSUTCDATETIME()
 	UPDATE [internal].[executionlog]
-	SET [EndTime] = @current_end
+	SET [EndTimeUTC] = @current_end
 	, [Duration_ms] =  ((CAST(DATEDIFF(S, @current_start, @current_end) AS bigint) * 1000000) + (DATEPART(MCS, @current_end)-DATEPART(MCS, @current_start))) / 1000.0
 	, [errornumber] = @@ERROR
 	WHERE [Id] = @current_logitem
@@ -351,6 +352,7 @@ Date		Name				Description
 ----------	-------------		-----------------------------------------------
 2022-04-28	Mikael Wedham		+Created v1
 2022-08-17	Mikael Wedham		Added cleanup of old data
+2026-03-31	Mikael Wedham		Adding UTC to column names
 *******************************************************************************/
 ALTER PROCEDURE [transfer].[databasefile_stats]
 (@cleanup bit = 0)
@@ -363,9 +365,9 @@ BEGIN
 	WHERE [MachineName] = CAST(SERVERPROPERTY('MachineName') AS nvarchar(128))
 
 	UPDATE s
-	SET [LastHandled] = SYSUTCDATETIME()
+	SET [LastHandledUTC] = SYSUTCDATETIME()
 	OUTPUT @serverid serverid 
-		 , inserted.[rowtime]
+		 , inserted.[rowtimeutc]
 	     , inserted.[database_id]
 		 , inserted.[file_id]
 		 , inserted.[size_mb]
@@ -376,15 +378,15 @@ BEGIN
 		 , inserted.[num_of_writes]
 		 , inserted.[num_of_bytes_written]
 		 , inserted.[io_stall_write_ms]
-		 , inserted.[LastUpdated]
-		 , inserted.[LastHandled]
+		 , inserted.[LastUpdatedUTC]
+		 , inserted.[LastHandledUTC]
 	FROM [data].[databasefile_stats] s
-	WHERE [LastHandled] IS NULL OR [LastUpdated] > [LastHandled]
+	WHERE [LastHandledUTC] IS NULL OR [LastUpdatedUTC] > [LastHandledUTC]
 
 	IF @cleanup = 1
 	BEGIN
 		DELETE FROM [data].[databasefile_stats]
-		WHERE [LastHandled] < DATEADD(DAY, -7, GETDATE())
+		WHERE [LastHandledUTC] < DATEADD(DAY, -7, GETDATE())
 	END
 
 END

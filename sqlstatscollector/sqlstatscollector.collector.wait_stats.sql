@@ -10,7 +10,7 @@ GO
 
 DECLARE @SchemaName nvarchar(128) = N'data'
 DECLARE @TableName nvarchar(128) = N'wait_stats'
-DECLARE @TableDefinitionHash varbinary(32) = 0xA2F127794469F3162EF39E2070A04DE25D259BC1E0D565886CAF2570025BF96A
+DECLARE @TableDefinitionHash varbinary(32) = 0x9A1064C48277A206C5CDDA6C49D1F2170F828581E5774E729970A42D697F6CE2
 
 DECLARE @TableExists int
 DECLARE @TableHasChanged int
@@ -38,18 +38,18 @@ BEGIN
 	SELECT @msg = N'Creating ' + @FullName
 	RAISERROR(@msg, 10, 1) WITH NOWAIT
 	CREATE TABLE [data].[wait_stats](
-		[rowtime] [datetime2](7) NOT NULL,
+		[rowtimeutc] [datetime2](7) NOT NULL,
 		[wait_type] [nvarchar](127) NOT NULL,
 		[interval_percentage] [decimal](18, 3) NOT NULL,
 		[wait_time_seconds] [decimal](18, 3) NOT NULL,
 		[resource_wait_time_seconds] [decimal](18, 3) NOT NULL,
 		[signal_wait_time_seconds] [decimal](18, 3) NOT NULL,
 		[wait_count] [bigint] NOT NULL,
-		[LastUpdated] [datetime2](7) NOT NULL,
-		[LastHandled] [datetime2](7) NULL,
+		[LastUpdatedUTC] [datetime2](7) NOT NULL,
+		[LastHandledUTC] [datetime2](7) NULL,
 		CONSTRAINT PK_data_wait_stats PRIMARY KEY CLUSTERED 
 			(
-				rowtime ASC,
+				rowtimeutc ASC,
 				wait_type ASC
 			) ON [PRIMARY]	
 	) ON [PRIMARY]
@@ -117,6 +117,8 @@ BEGIN
 END
 GO
 
+
+
 /*******************************************************************************
    Copyright (c) 2022 Mikael Wedham (MIT License)
    -----------------------------------------
@@ -135,11 +137,12 @@ Date		Name				Description
 ----------	-------------		-----------------------------------------------
 2022-01-21	Mikael Wedham		+Created v1
 2022-04-28	Mikael Wedham		+Modified Schema of temp-tables
-2022-05-05     Mikael Wedham       +Code and events updated from sqlskills website.
-                                    Credits and help links added.
-2024-01-17     Mikael Wedham		+Added division by zero handling
+2022-05-05  Mikael Wedham       +Code and events updated from sqlskills website.
+                                 Credits and help links added.
+2024-01-17  Mikael Wedham		+Added division by zero handling
 2024-01-19	Mikael Wedham		+Added logging of duration
 2024-01-23	Mikael Wedham		+Added errorhandling
+2026-03-31	Mikael Wedham		Adding UTC to column names
 *******************************************************************************/
 ALTER PROCEDURE [collect].[wait_stats]
 AS
@@ -153,7 +156,7 @@ SET NOCOUNT ON
 	DECLARE @error int = 0
 
 	SELECT @current_start = SYSUTCDATETIME()
-	INSERT INTO [internal].[executionlog] ([collector], [StartTime])
+	INSERT INTO [internal].[executionlog] ([collector], [StartTimeUTC])
 	VALUES (N'wait_stats', @current_start)
 	SET @current_logitem = SCOPE_IDENTITY()
 
@@ -269,7 +272,7 @@ SET NOCOUNT ON
 			
 			AND [waiting_tasks_count] > 0
 		
-		INSERT INTO [data].[wait_stats] ([rowtime] ,[wait_type], [interval_percentage], [wait_time_seconds], [resource_wait_time_seconds], [signal_wait_time_seconds], [wait_count], [LastUpdated])
+		INSERT INTO [data].[wait_stats] ([rowtimeutc] ,[wait_type], [interval_percentage], [wait_time_seconds], [resource_wait_time_seconds], [signal_wait_time_seconds], [wait_count], [LastUpdatedUTC])
 		SELECT [rowtime] = SYSUTCDATETIME()
 			, [wait_type]
 			, [percentage]
@@ -310,7 +313,7 @@ SET NOCOUNT ON
 
 	SELECT @current_end = SYSUTCDATETIME()
 	UPDATE [internal].[executionlog]
-	SET [EndTime] = @current_end
+	SET [EndTimeUTC] = @current_end
 	, [Duration_ms] =  ((CAST(DATEDIFF(S, @current_start, @current_end) AS bigint) * 1000000) + (DATEPART(MCS, @current_end)-DATEPART(MCS, @current_start))) / 1000.0
 	, [errornumber] = @@ERROR
 	WHERE [Id] = @current_logitem
@@ -329,6 +332,8 @@ BEGIN
 END
 GO
 
+
+
 /*******************************************************************************
    Copyright (c) 2022 Mikael Wedham (MIT License)
    -----------------------------------------
@@ -342,6 +347,7 @@ Date		Name				Description
 2022-04-28	Mikael Wedham		+Created v1
 2022-08-17	Mikael Wedham		Added cleanup of old data
 2024-01-17	Mikael Wedham		Refreshed filter on wait types
+2026-03-31	Mikael Wedham		Adding UTC to column names
 *******************************************************************************/
 ALTER PROCEDURE [transfer].[wait_stats]
 (@cleanup bit = 0)
@@ -354,24 +360,24 @@ BEGIN
 	WHERE [MachineName] = CAST(SERVERPROPERTY('MachineName') AS nvarchar(128))
 
 	UPDATE s
-	SET [LastHandled] = SYSUTCDATETIME()
+	SET [LastHandledUTC] = SYSUTCDATETIME()
 	OUTPUT @serverid serverid 
-	     , inserted.[rowtime]
+	     , inserted.[rowtimeutc]
 		 , inserted.[wait_type]
 		 , inserted.[interval_percentage]
 		 , inserted.[wait_time_seconds]
 		 , inserted.[resource_wait_time_seconds]
 		 , inserted.[signal_wait_time_seconds]
 		 , inserted.[wait_count]
-		 , inserted.[LastUpdated]
-		 , inserted.[LastHandled]
+		 , inserted.[LastUpdatedUTC]
+		 , inserted.[LastHandledUTC]
 	FROM [data].[wait_stats] s
-	WHERE [LastHandled] IS NULL OR [LastUpdated] > [LastHandled]
+	WHERE [LastHandledUTC] IS NULL OR [LastUpdatedUTC] > [LastHandledUTC]
 	
 	IF @cleanup = 1
 	BEGIN
 		DELETE FROM [data].[wait_stats]
-		WHERE [LastHandled] < DATEADD(DAY, -7, GETDATE())
+		WHERE [LastHandledUTC] < DATEADD(DAY, -7, GETDATE())
 	END
 END
 GO

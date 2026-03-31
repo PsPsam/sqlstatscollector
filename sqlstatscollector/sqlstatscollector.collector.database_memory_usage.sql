@@ -10,7 +10,7 @@ GO
 
 DECLARE @SchemaName nvarchar(128) = N'data'
 DECLARE @TableName nvarchar(128) = N'database_memory_usage'
-DECLARE @TableDefinitionHash varbinary(32) = 0x3957CC2F94631A92275F7983A91F52C5158E45033E808CF5FD5F0D5A865EC29D
+DECLARE @TableDefinitionHash varbinary(32) = 0xB09B516E503E2D334ED50B56B791F35D97AFACF1CC15DF38964E2F88B42EE65A
 
 DECLARE @TableExists int
 DECLARE @TableHasChanged int
@@ -38,16 +38,16 @@ BEGIN
 	SELECT @msg = N'Creating ' + @FullName
 	RAISERROR(@msg, 10, 1) WITH NOWAIT
 	CREATE TABLE [data].[database_memory_usage](
-		[rowtime] [datetime2](7) NOT NULL,
+		[rowtimeutc] [datetime2](7) NOT NULL,
 		[database_id] [int] NOT NULL,
 		[page_count] [int] NOT NULL,
 		[cached_size_mb] [decimal](15, 2) NOT NULL,
 		[buffer_pool_percent] [decimal](5, 2) NOT NULL,
-		[LastUpdated] [datetime2](7) NOT NULL,
-		[LastHandled] [datetime2](7) NULL,
+		[LastUpdatedUTC] [datetime2](7) NOT NULL,
+		[LastHandledUTC] [datetime2](7) NULL,
 		CONSTRAINT PK_data_database_memory_usage PRIMARY KEY CLUSTERED 
 			(
-				rowtime ASC,
+				rowtimeutc ASC,
 				database_id ASC
 			) ON [PRIMARY]
 	) ON [PRIMARY]
@@ -68,6 +68,8 @@ BEGIN
 END
 GO
 
+
+
 /*******************************************************************************
 --Copyright (c) 2022 Mikael Wedham (MIT License)
    -----------------------------------------
@@ -82,6 +84,7 @@ Date		Name				Description
 2022-05-05	Mikael Wedham		+Created v1
 2024-01-19	Mikael Wedham		+Added logging of duration
 2024-01-23	Mikael Wedham		+Added errorhandling
+2026-03-31	Mikael Wedham		Adding UTC to column names
 *******************************************************************************/
 ALTER PROCEDURE [collect].[database_memory_usage]
 AS
@@ -95,7 +98,7 @@ SET NOCOUNT ON
 	DECLARE @error int = 0
 
 	SELECT @current_start = SYSUTCDATETIME()
-	INSERT INTO [internal].[executionlog] ([collector], [StartTime])
+	INSERT INTO [internal].[executionlog] ([collector], [StartTimeUTC])
 	VALUES (N'database_memory_usage', @current_start)
 	SET @current_logitem = SCOPE_IDENTITY()
 
@@ -108,7 +111,7 @@ SET NOCOUNT ON
 		FROM sys.dm_os_buffer_descriptors WITH (NOLOCK)
 		GROUP BY database_id)
 
-		INSERT INTO [data].[database_memory_usage]  ([rowtime] ,[database_id] ,[page_count] ,[cached_size_mb] , [buffer_pool_percent], [LastUpdated])
+		INSERT INTO [data].[database_memory_usage]  ([rowtimeutc] ,[database_id] ,[page_count] ,[cached_size_mb] , [buffer_pool_percent], [LastUpdatedUTC])
 		SELECT [rowtime] = SYSUTCDATETIME()
 			, [database_id]
 			, [page_count]
@@ -129,7 +132,7 @@ SET NOCOUNT ON
 
 	SELECT @current_end = SYSUTCDATETIME()
 	UPDATE [internal].[executionlog]
-	SET [EndTime] = @current_end
+	SET [EndTimeUTC] = @current_end
 	, [Duration_ms] =  ((CAST(DATEDIFF(S, @current_start, @current_end) AS bigint) * 1000000) + (DATEPART(MCS, @current_end)-DATEPART(MCS, @current_start))) / 1000.0
 	, [errornumber] = @@ERROR
 	WHERE [Id] = @current_logitem
@@ -162,6 +165,7 @@ Date		Name				Description
 ----------	-------------		-----------------------------------------------
 2022-05-05	Mikael Wedham		+Created v1
 2022-08-17	Mikael Wedham		Added cleanup of old data
+2026-03-31	Mikael Wedham		Adding UTC to column names
 *******************************************************************************/
 ALTER PROCEDURE [transfer].[database_memory_usage]
 (@cleanup bit = 0)
@@ -174,22 +178,22 @@ BEGIN
 	WHERE [MachineName] = CAST(SERVERPROPERTY('MachineName') AS nvarchar(128))
 
 	UPDATE s
-	SET [LastHandled] = SYSUTCDATETIME()
+	SET [LastHandledUTC] = SYSUTCDATETIME()
 	OUTPUT @serverid serverid 
-	     , inserted.[rowtime]
+	     , inserted.[rowtimeutc]
 		 , inserted.[database_id]
 		 , inserted.[page_count]
 		 , inserted.[cached_size_mb]
 		 , inserted.[buffer_pool_percent]
-		 , inserted.[LastUpdated]
-		 , inserted.[LastHandled]
+		 , inserted.[LastUpdatedUTC]
+		 , inserted.[LastHandledUTC]
 	FROM [data].[database_memory_usage] s
-	WHERE [LastHandled] IS NULL OR [LastUpdated] > [LastHandled]
+	WHERE [LastHandledUTC] IS NULL OR [LastUpdatedUTC] > [LastHandledUTC]
 
 	IF @cleanup = 1
 	BEGIN
 		DELETE FROM [data].[database_memory_usage]
-		WHERE [LastHandled] < DATEADD(DAY, -7, GETDATE())
+		WHERE [LastHandledUTC] < DATEADD(DAY, -7, GETDATE())
 	END
 
 END

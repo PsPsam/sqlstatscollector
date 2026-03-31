@@ -120,6 +120,7 @@ BEGIN
               WHEN @version LIKE '14%'    THEN '2017'
               WHEN @version LIKE '15%'    THEN '2019'
               WHEN @version LIKE '16%'    THEN '2022'
+              WHEN @version LIKE '17%'    THEN '2025'
    ELSE 'Unknown' END
 
   RETURN (@result)
@@ -260,7 +261,7 @@ GO
 
 DECLARE @SchemaName nvarchar(128) = N'internal'
 DECLARE @TableName nvarchar(128) = N'executionlog'
-DECLARE @TableDefinitionHash varbinary(32) = 0x791191304DF49CD6686A355781A07B272603EF2A04F38F17F97DFEE5607F467E
+DECLARE @TableDefinitionHash varbinary(32) = 0x51994AA2AF53EABDEE1BE9E836B69B77088CE6BF5B1040CDD887831CA7509616
 
 DECLARE @TableExists int
 DECLARE @TableHasChanged int
@@ -290,8 +291,8 @@ BEGIN
 	CREATE TABLE [internal].[executionlog](
 		[Id] [bigint] IDENTITY(1,1) NOT NULL,
 		[collector] [nvarchar](100) NOT NULL,
-		[StartTime] [datetime2](6) NOT NULL,
-		[EndTime] [datetime2](6) NULL,
+		[StartTimeUTC] [datetime2](6) NOT NULL,
+		[EndTimeUTC] [datetime2](6) NULL,
 		[Duration_ms] [decimal](18, 3) NULL,
 		[errornumber] [int] NULL,
 		 CONSTRAINT [PK_internal_executionlog] PRIMARY KEY CLUSTERED 

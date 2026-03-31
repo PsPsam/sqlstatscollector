@@ -10,7 +10,7 @@ GO
 
 DECLARE @SchemaName nvarchar(128) = N'data'
 DECLARE @TableName nvarchar(128) = N'memory_stats'
-DECLARE @TableDefinitionHash varbinary(32) = 0xD78B6EEAF8DD34B2C061BBCFF39A4575AF9E5FB8B9B0FD89FF17609608C24875
+DECLARE @TableDefinitionHash varbinary(32) = 0x05B12D7EDE511EF5A392D946CC44B7F4375D7820BABD7F4B29BBF327B5A335BD
 
 DECLARE @TableExists int
 DECLARE @TableHasChanged int
@@ -38,7 +38,7 @@ BEGIN
 	SELECT @msg = N'Creating ' + @FullName
 	RAISERROR(@msg, 10, 1) WITH NOWAIT
 	CREATE TABLE [data].[memory_stats](
-		[rowtime] [datetime2](7) NOT NULL,
+		[rowtimeutc] [datetime2](7) NOT NULL,
 		[page_life_expectancy] [int] NOT NULL,
 		[target_server_memory_mb] [bigint] NOT NULL,
 		[total_server_memory_mb] [bigint] NOT NULL,
@@ -46,11 +46,11 @@ BEGIN
 		[available_physical_memory_mb] [bigint] NOT NULL,
 		[percent_memory_used] [decimal](18, 3) NOT NULL,
 		[system_memory_state_desc] [nvarchar](256) NOT NULL,
-		[LastUpdated] [datetime2](7) NOT NULL,
-		[LastHandled] [datetime2](7) NULL,
+		[LastUpdatedUTC] [datetime2](7) NOT NULL,
+		[LastHandledUTC] [datetime2](7) NULL,
 		CONSTRAINT PK_data_memory_stats PRIMARY KEY CLUSTERED 
 			(
-				rowtime ASC
+				rowtimeutc ASC
 			) ON [PRIMARY]	
 	) ON [PRIMARY]
 END
@@ -83,6 +83,7 @@ Date		Name				Description
 2022-04-27	Mikael Wedham		+Created v1
 2024-01-19	Mikael Wedham		+Added logging of duration
 2024-01-23	Mikael Wedham		+Added errorhandling
+2026-03-31	Mikael Wedham		Adding UTC to column names
 *******************************************************************************/
 ALTER PROCEDURE [collect].[memory_stats]
 AS
@@ -96,7 +97,7 @@ SET NOCOUNT ON
 	DECLARE @error int = 0
 
 	SELECT @current_start = SYSUTCDATETIME()
-	INSERT INTO [internal].[executionlog] ([collector], [StartTime])
+	INSERT INTO [internal].[executionlog] ([collector], [StartTimeUTC])
 	VALUES (N'memory_stats', @current_start)
 	SET @current_logitem = SCOPE_IDENTITY()
 
@@ -121,7 +122,7 @@ SET NOCOUNT ON
 		WHERE [object_name] LIKE N'%Memory Manager%' 
 		AND [counter_name] = N'Target Server Memory (KB)'
 
-		INSERT INTO [data].[memory_stats] ([page_life_expectancy], [target_server_memory_mb], [total_server_memory_mb], [total_physical_memory_mb], [available_physical_memory_mb], [percent_memory_used], [system_memory_state_desc], [rowtime], [LastUpdated])
+		INSERT INTO [data].[memory_stats] ([page_life_expectancy], [target_server_memory_mb], [total_server_memory_mb], [total_physical_memory_mb], [available_physical_memory_mb], [percent_memory_used], [system_memory_state_desc], [rowtimeutc], [LastUpdatedUTC])
 		SELECT [page_life_expectancy] = @page_life_expectancy
 			, [target_sql_server_memory_mb] = @target_server_memory_mb
 			, [total_sql_server_memory_mb] = @total_server_memory_mb
@@ -142,7 +143,7 @@ SET NOCOUNT ON
 
 	SELECT @current_end = SYSUTCDATETIME()
 	UPDATE [internal].[executionlog]
-	SET [EndTime] = @current_end
+	SET [EndTimeUTC] = @current_end
 	, [Duration_ms] =  ((CAST(DATEDIFF(S, @current_start, @current_end) AS bigint) * 1000000) + (DATEPART(MCS, @current_end)-DATEPART(MCS, @current_start))) / 1000.0
 	, [errornumber] = @@ERROR
 	WHERE [Id] = @current_logitem
@@ -174,6 +175,7 @@ Date		Name				Description
 ----------	-------------		-----------------------------------------------
 2022-04-28	Mikael Wedham		+Created v1
 2022-08-17	Mikael Wedham		Added cleanup of old data
+2026-03-31	Mikael Wedham		Adding UTC to column names
 *******************************************************************************/
 ALTER PROCEDURE [transfer].[memory_stats]
 (@cleanup bit = 0)
@@ -186,9 +188,9 @@ BEGIN
 	WHERE [MachineName] = CAST(SERVERPROPERTY('MachineName') AS nvarchar(128))
 
 	UPDATE s
-	SET [LastHandled] = SYSUTCDATETIME()
+	SET [LastHandledUTC] = SYSUTCDATETIME()
 	OUTPUT @serverid serverid 
-		 , inserted.[rowtime]
+		 , inserted.[rowtimeutc]
 	     , inserted.[page_life_expectancy]
 	     , inserted.[target_server_memory_mb]
 	     , inserted.[total_server_memory_mb]
@@ -196,15 +198,15 @@ BEGIN
 	     , inserted.[available_physical_memory_mb]
 	     , inserted.[percent_memory_used]
 	     , inserted.[system_memory_state_desc]
-		 , inserted.[LastUpdated]
-		 , inserted.[LastHandled]
+		 , inserted.[LastUpdatedUTC]
+		 , inserted.[LastHandledUTC]
 	FROM [data].[memory_stats] s
-	WHERE [LastHandled] IS NULL OR [LastUpdated] > [LastHandled]
+	WHERE [LastHandledUTC] IS NULL OR [LastUpdatedUTC] > [LastHandledUTC]
 
 	IF @cleanup = 1
 	BEGIN
 		DELETE FROM [data].[memory_stats]
-		WHERE [LastHandled] < DATEADD(DAY, -7, GETDATE())
+		WHERE [LastHandledUTC] < DATEADD(DAY, -7, GETDATE())
 	END
 
 END

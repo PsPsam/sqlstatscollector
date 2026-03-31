@@ -11,7 +11,7 @@ GO
 
 DECLARE @SchemaName nvarchar(128) = N'data'
 DECLARE @TableName nvarchar(128) = N'databasefile_properties'
-DECLARE @TableDefinitionHash varbinary(32) = 0x9316C54921A35559D38BC79FD7BC7CB923264E69D6B047A20CFCA94D29B5F9F8
+DECLARE @TableDefinitionHash varbinary(32) = 0xDE872F4E7FF352E269CACED6EBD201F7FE4713C5E78837761E1DF706100623D7
 
 DECLARE @TableExists int
 DECLARE @TableHasChanged int
@@ -49,8 +49,8 @@ BEGIN
 		[max_size_mb] [int] NULL,
 		[growth_mb] [int] NULL,
 		[growth_percent] [int] NULL,
-		[LastUpdated] [datetime2](7) NOT NULL,
-		[LastHandled] [datetime2](7) NULL,
+		[LastUpdatedUTC] [datetime2](7) NOT NULL,
+		[LastHandledUTC] [datetime2](7) NULL,
 		 CONSTRAINT [PK_databasefile_properties] PRIMARY KEY CLUSTERED 
 			(
 				[database_id] ASC,
@@ -89,6 +89,7 @@ Date		Name				Description
 2022-01-23	Mikael Wedham		+Created v1
 2024-01-19	Mikael Wedham		+Added logging of duration
 2024-01-23	Mikael Wedham		+Added errorhandling
+2026-03-31	Mikael Wedham		Adding UTC to column names
 *******************************************************************************/
 ALTER PROCEDURE [collect].[databasefile_properties]
 AS
@@ -102,7 +103,7 @@ SET NOCOUNT ON
 	DECLARE @error int = 0
 
 	SELECT @current_start = SYSUTCDATETIME()
-	INSERT INTO [internal].[executionlog] ([collector], [StartTime])
+	INSERT INTO [internal].[executionlog] ([collector], [StartTimeUTC])
 	VALUES (N'databasefile_properties', @current_start)
 	SET @current_logitem = SCOPE_IDENTITY()
 
@@ -127,7 +128,7 @@ SET NOCOUNT ON
 		ON src.[database_id] = dest.[database_id] AND src.[file_id] = dest.[file_id]  
 		WHEN NOT MATCHED THEN
 			INSERT ([database_id], [file_id], [type_desc], [name], [physical_name], [state_desc]
-				, [size_mb], [max_size_mb] ,[growth_mb] ,[growth_percent] ,[LastUpdated]) 
+				, [size_mb], [max_size_mb] ,[growth_mb] ,[growth_percent] ,[LastUpdatedUTC]) 
 			VALUES (src.[database_id], src.[file_id], src.[type_desc], src.[name], src.[physical_name], src.[state_desc]
 				, src.[size_mb], src.[max_size_mb] ,src.[growth_mb] ,src.[growth_percent] ,SYSUTCDATETIME()) 
 		WHEN MATCHED THEN 
@@ -140,7 +141,7 @@ SET NOCOUNT ON
 			,[max_size_mb] = src.[max_size_mb]
 			,[growth_mb] = src.[growth_mb]
 			,[growth_percent] = src.[growth_percent]
-			,[LastUpdated] = SYSUTCDATETIME()
+			,[LastUpdatedUTC] = SYSUTCDATETIME()
 		WHEN NOT MATCHED BY SOURCE THEN --File was removed from the database
 			UPDATE SET
 			[type_desc] = N'NONE'
@@ -151,7 +152,7 @@ SET NOCOUNT ON
 			,[max_size_mb] = NULL
 			,[growth_mb] = NULL
 			,[growth_percent] = NULL
-			,[LastUpdated] = SYSUTCDATETIME();
+			,[LastUpdatedUTC] = SYSUTCDATETIME();
 
 	END TRY
 	BEGIN CATCH
@@ -162,7 +163,7 @@ SET NOCOUNT ON
 
 	SELECT @current_end = SYSUTCDATETIME()
 	UPDATE [internal].[executionlog]
-	SET [EndTime] = @current_end
+	SET [EndTimeUTC] = @current_end
 	, [Duration_ms] =  ((CAST(DATEDIFF(S, @current_start, @current_end) AS bigint) * 1000000) + (DATEPART(MCS, @current_end)-DATEPART(MCS, @current_start))) / 1000.0
 	, [errornumber] = @@ERROR
 	WHERE [Id] = @current_logitem
@@ -194,6 +195,7 @@ GO
 Date		Name				Description
 ----------	-------------		-----------------------------------------------
 2022-04-28	Mikael Wedham		+Created v1
+2026-03-31	Mikael Wedham		Adding UTC to column names
 *******************************************************************************/
 ALTER PROCEDURE [transfer].[databasefile_properties]
 AS
@@ -205,7 +207,7 @@ BEGIN
 	WHERE [MachineName] = CAST(SERVERPROPERTY('MachineName') AS nvarchar(128))
 
 	UPDATE s
-	SET [LastHandled] = SYSUTCDATETIME()
+	SET [LastHandledUTC] = SYSUTCDATETIME()
 	OUTPUT @serverid serverid 
 	     , inserted.[database_id]
 		 , inserted.[file_id]
@@ -217,10 +219,10 @@ BEGIN
 		 , inserted.[max_size_mb]
 		 , inserted.[growth_mb]
 		 , inserted.[growth_percent]
-		 , inserted.[LastUpdated]
-		 , inserted.[LastHandled]
+		 , inserted.[LastUpdatedUTC]
+		 , inserted.[LastHandledUTC]
 	FROM [data].[databasefile_properties] s
-	WHERE [LastHandled] IS NULL OR [LastUpdated] > [LastHandled]
+	WHERE [LastHandledUTC] IS NULL OR [LastUpdatedUTC] > [LastHandledUTC]
 
 END
 GO
